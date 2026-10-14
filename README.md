@@ -47,6 +47,34 @@ pede ajustes em linguagem natural ("legenda maior", "corta essa frase", "tira o 
 - 🧩 **Copia o estilo de um vídeo de referência**: mede posição/tamanho da legenda, tempos de animação e
   identifica a fonte (`helpers/extract_logo.py` recorta um logo seu de um vídeo de referência).
 
+## Novo: profundidade, recorte e 3D
+
+Para o vídeo não ficar "chapado", o editor separa cada quadro em **camadas reais**:
+
+```
+fundo  →  elementos ATRÁS da pessoa  →  a PESSOA recortada  →  elementos NA FRENTE  →  legenda
+```
+
+- ✂️ **Recorte de pessoa** por IA (`helpers/segment.py`) → **texto atrás da pessoa** (ela passa na frente do
+  título), troca/desfoque de fundo, e **cartão final em profundidade** (a pessoa "descola" do vídeo como um
+  adesivo com contorno e sombra, sobre o fundo da marca).
+- 🧊 **3D a partir de qualquer logo ou texto** (`helpers/vectorize.py` + `motion3d/`): extrusão com bisel,
+  material e luz, entrada girando, flutuação, giro ou balanço — renderizado com three.js no seu próprio Chrome,
+  com fundo transparente.
+- ✋ **Objetos presos à mão** (`helpers/hands.py`): o 3D flutua sobre a mão de quem fala e acompanha o movimento.
+- 📷 **Foto 2.5D** (`helpers/depth.py` + `motion3d/parallax.html`): um quadro parado ganha volume com um
+  movimento de câmera.
+
+Ative com:
+
+```bash
+.venv/Scripts/python helpers/get_models.py      # modelos de IA (~60 MB)
+.venv/Scripts/python -m pip install mediapipe   # só para o rastreamento de mão
+cd motion3d && npm install                      # motor 3D (precisa de Node.js; usa o Chrome/Edge instalado)
+```
+
+Exemplos em `motion3d/examples/`. Tudo roda em CPU: recorte ~1–3 s por quadro, 3D ~40–150 ms por quadro.
+
 ## Requisitos
 
 - [Claude Code](https://claude.com/claude-code) (app desktop ou terminal) com uma conta Claude.

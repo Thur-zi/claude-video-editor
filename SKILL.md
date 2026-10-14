@@ -36,6 +36,16 @@ These override anything below that conflicts with them. `<repo>` = the directory
     (then render with `--no-subtitles`).
   - `templates/end_card.py` — clean animated end card (big outline→fill headline, staggered lines) → a source clip
     to append as the last EDL range.
+  - **Depth layers & 3D (motion design)** — playbook §10. Models: `python helpers/get_models.py`; 3D engine:
+    `cd motion3d && npm install` (uses the local Chrome/Edge, no browser download).
+    - `helpers/segment.py <video> -o <dir>` (or `--at T -o m.png`) — person mattes (MODNet, CPU).
+    - `helpers/layers.py` — `occlude()` (element BEHIND the person), `cutout()`, `sticker()`, `affine()`;
+      CLI `occlude --overlay over.mov --mattes <dir>`. Mattes must come from the BASE render (same zoom/crop).
+    - `helpers/hands.py <video> -o hands.json [--at T]` — hand landmarks → palm/thumb/top anchors.
+    - `helpers/depth.py <img | video --at T> -o depth.png` — monocular depth for 2.5D.
+    - `helpers/vectorize.py logo.png | --text "OLÁ" -o shape.json` → `node motion3d/render3d.mjs spec.json` —
+      extruded, bevelled, lit 3D logo/text (entrance + float + spin, or swing for readable text) as transparent
+      frames + .mov; `"page": "parallax.html"` + image + depthMap → 2.5D camera move. See motion3d/examples/.
   - `helpers/sfx.py <edit>/sfx` — synthesized whoosh / pop / click / impact / riser (+ hit offsets).
   - `helpers/extract_logo.py` — lift a flat-colour logo off a solid background in a reference video (clean,
     re-vectorised RGBA) when the user wants to match a reference's branding (only with their own assets).

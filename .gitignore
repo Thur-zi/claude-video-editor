@@ -63,3 +63,10 @@ project.md
 *_frames/
 ov_frames/
 ec_frames/
+
+# Depth/3D toolkit
+models/
+motion3d/node_modules/
+motion3d/_assets/
+motion3d/out/
+motion3d/shapes/*.json

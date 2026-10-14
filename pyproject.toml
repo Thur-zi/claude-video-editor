@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 animations = ["manim"]
+hands = ["mediapipe"]           # helpers/hands.py (segment/depth use onnxruntime, already installed)
 
 [build-system]
 requires = ["setuptools>=61.0"]

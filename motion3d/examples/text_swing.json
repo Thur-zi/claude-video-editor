@@ -1,0 +1,25 @@
+{
+ "vector": "../shapes/text.json",
+ "out": "../out/text_frames",
+ "mov": "../out/text.mov",
+ "width": 640,
+ "height": 640,
+ "fps": 24,
+ "duration": 3.5,
+ "color": "#FDCE00",
+ "depth": 0.42,
+ "bevel": 0.05,
+ "metalness": 0.35,
+ "roughness": 0.22,
+ "clearcoat": 1.0,
+ "anim": {
+  "entrance": 0.65,
+  "entranceTwistDeg": 360,
+  "spinDegPerSec": 0,
+  "swingDeg": 32,
+  "swingPeriod": 3.0,
+  "startYawDeg": 0,
+  "bob": 0.09,
+  "bobPeriod": 2.2
+ }
+}

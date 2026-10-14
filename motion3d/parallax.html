@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": { "three": "/node_modules/three/build/three.module.js" } }
+</script>
+</head>
+<body>
+<script type="module">
+// 2.5D "3D photo": a still image displaced by its depth map, filmed by a slowly moving camera.
+// SPEC: { width, height, image: url, depthMap: url, displacement: 0.35, segments: 256,
+//         move: { dolly: 0.25, orbitDeg: 4, rise: 0.05, ease: true }, duration }
+import * as THREE from 'three';
+const S = window.SPEC;
+const W = S.width, H = S.height;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const loader = new THREE.TextureLoader();
+const [tex, dep] = await Promise.all([loader.loadAsync(S.image), loader.loadAsync(S.depthMap)]);
+tex.colorSpace = THREE.SRGBColorSpace;
+const aspect = tex.image.width / tex.image.height;
+const planeH = 2.0, planeW = planeH * aspect;
+const seg = S.segments ?? 256;
+const geo = new THREE.PlaneGeometry(planeW, planeH, Math.round(seg * aspect), seg);
+const mat = new THREE.MeshBasicMaterial({ map: tex });
+mat.onBeforeCompile = (sh) => {
+  sh.uniforms.dMap = { value: dep };
+  sh.uniforms.dScale = { value: S.displacement ?? 0.35 };
+  sh.vertexShader = 'uniform sampler2D dMap; uniform float dScale;\n' + sh.vertexShader.replace(
+    '#include <begin_vertex>',
+    '#include <begin_vertex>\n float d = texture2D(dMap, uv).r; transformed.z += d * dScale;');
+};
+scene.add(new THREE.Mesh(geo, mat));
+
+const fov = 30;
+const camera = new THREE.PerspectiveCamera(fov, W / H, 0.01, 100);
+// distance so the plane fills the frame (cover) with a small margin for the move
+const fitH = planeH / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)));
+const fitW = planeW / (2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)) * (W / H));
+const baseZ = Math.min(fitH, fitW) * (S.margin ?? 0.9);
+const ease = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+window.renderFrame = (t) => {
+  const M = S.move ?? {};
+  const p = M.ease === false ? t / S.duration : ease(Math.min(1, t / S.duration));
+  const orbit = THREE.MathUtils.degToRad((M.orbitDeg ?? 4) * (p - 0.5) * 2);
+  const z = baseZ - (M.dolly ?? 0.25) * p;
+  camera.position.set(Math.sin(orbit) * z, (M.rise ?? 0.05) * (p - 0.5) * 2, Math.cos(orbit) * z + (S.displacement ?? 0.35) * 0.5);
+  camera.lookAt(0, 0, (S.displacement ?? 0.35) * 0.5);
+  renderer.render(scene, camera);
+  return renderer.domElement.toDataURL('image/png');
+};
+window.READY = true;
+</script>
+</body>
+</html>

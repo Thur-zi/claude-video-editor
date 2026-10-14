@@ -1,0 +1,21 @@
+{
+ "vector": "../shapes/logo.json",
+ "out": "../out/logo_frames",
+ "mov": "../out/logo.mov",
+ "width": 600,
+ "height": 600,
+ "fps": 24,
+ "duration": 3.0,
+ "color": "#D97757",
+ "depth": 0.28,
+ "bevel": 0.04,
+ "metalness": 0.05,
+ "roughness": 0.45,
+ "clearcoat": 0.4,
+ "anim": {
+  "entrance": 0.7,
+  "entranceTwistDeg": 270,
+  "spinDegPerSec": 80,
+  "bob": 0.09
+ }
+}

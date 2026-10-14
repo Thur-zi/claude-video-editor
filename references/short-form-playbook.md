@@ -111,3 +111,23 @@ blog. Everything here is a default, not a law — but deviate on purpose, not by
 Overused transitions, random zooms, same SFX on every beat, inconsistent voice level, music too
 loud, low-contrast or ornate text, missing captions, graphics covering the face, end card that
 drags, a silent tail.
+
+## 10. Depth layers, cutouts and 3D (motion design that doesn't look flat)
+Separate the frame into real planes: background → elements BEHIND → person (matte) → elements in FRONT → captions/legal.
+- **Text behind the person**: render the element as an RGBA overlay, multiply its alpha by (1 − matte) per frame
+  (`layers.occlude`), composite it BEFORE the captions overlay. Mattes must come from the BASE render (same zoom/crop).
+  Big, high-contrast against the wall (e.g. brand blue on a light wall), placed so the HEAD overlaps its lower third —
+  partial occlusion is what sells the depth; keep the key glyphs readable.
+- **Depth end card** (instead of a flat card): start on the exact last frame (seamless cut) → background (1 − matte)
+  dissolves into the brand background while the person stays → person "lifts off" as a sticker (9–10 px white outline +
+  soft shadow 25–30 px, ~50 %) and pulls back slowly (scale 1 → 0.9, +50 px) while the background drifts the other way
+  (parallax) → hero text behind the head, info pill in front on the lower body (clear of any chest logo).
+- **3D objects from logos/text**: vectorize → extrude (depth ~0.3–0.45, bevel ~0.05) → physical material + room env
+  light, NeutralToneMapping so brand colours survive. Entrance: twist + overshoot (0.6–0.7 s); idle: float/bob
+  (period 2.2–2.6 s, ±0.08) + slight wobble. **Text/numbers must SWING (±30–35°), never spin 360°** — the back reads mirrored.
+- **Attach to a hand**: hand landmarks → anchor above the thumb tip / palm; apply the SAME transform the person layer gets;
+  object must stay off the face keep-out; size ~2.5–3× the hand size reads well on a phone.
+- **2.5D photo**: depth map + displaced plane + slow dolly/orbit (dolly 0.25–0.35, orbit ±4–6°) gives a still real volume;
+  keep the move small or edges stretch.
+- Costs on a 2-core CPU: matte ~1–3 s/frame (only mat the window you need), hands ~0.1 s/frame, depth ~10 s/image,
+  3D/2.5D render 40–150 ms/frame.

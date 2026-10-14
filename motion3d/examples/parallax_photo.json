@@ -1,0 +1,17 @@
+{
+ "page": "parallax.html",
+ "image": "../out/frame.png",
+ "depthMap": "../out/depth.png",
+ "out": "../out/parallax_frames",
+ "mov": "../out/parallax.mov",
+ "width": 540,
+ "height": 960,
+ "fps": 24,
+ "duration": 3.0,
+ "displacement": 0.3,
+ "move": {
+  "dolly": 0.35,
+  "orbitDeg": 6,
+  "rise": 0.04
+ }
+}
