@@ -49,11 +49,23 @@ except Exception:
 # baseline roughly 30% up from the bottom on any aspect — clear of the UI on
 # every major vertical-video platform. Do not drop this below ~75 without a
 # specific reason.
+import os as _os
+
+# Helvetica only exists on macOS; libass on Windows/Linux would fall back to an
+# arbitrary face. VIDEO_USE_SUB_FONT overrides.
+SUB_FONT = _os.environ.get("VIDEO_USE_SUB_FONT") or (
+    "Helvetica" if sys.platform == "darwin" else "Arial"
+)
+
+# VIDEO_USE_SUB_MARGINV moves captions off something that must stay visible
+# (a logo/number on the speaker's chest); keep it >= ~60 on vertical video.
+SUB_MARGIN_V = int(_os.environ.get("VIDEO_USE_SUB_MARGINV") or 90)
+
 SUB_FORCE_STYLE = (
-    "FontName=Helvetica,FontSize=18,Bold=1,"
+    f"FontName={SUB_FONT},FontSize=18,Bold=1,"
     "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,"
     "BorderStyle=1,Outline=2,Shadow=0,"
-    "Alignment=2,MarginV=90"
+    f"Alignment=2,MarginV={SUB_MARGIN_V}"
 )
 
 # -------- Helpers ------------------------------------------------------------
@@ -245,6 +257,68 @@ def probe_source_fps(video: Path) -> str | None:
 # -------- Per-segment extraction (Rule 2 + Rule 3) --------------------------
 
 
+OUTPUT_FORMATS = ("source", "vertical", "vertical-blur")
+
+
+def layout_filter(output_format: str, portrait: bool, draft: bool) -> str:
+    """Scale (and for social formats, reframe) to the output canvas.
+
+    source         keep the source orientation, long edge 1920 (1280 in draft)
+    vertical       exact 1080x1920 (9:16): scale to cover + center crop
+    vertical-blur  exact 1080x1920: whole frame centered over a blurred fill
+                   (keeps everything in shot when a landscape crop would cut people out)
+    """
+    if output_format == "source":
+        if draft:
+            return "scale=-2:1280" if portrait else "scale=1280:-2"
+        return "scale=-2:1920" if portrait else "scale=1920:-2"
+    w, h = (720, 1280) if draft else (1080, 1920)
+    cover = (f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd+full_chroma_int,"
+             f"crop={w}:{h},setsar=1")
+    if output_format == "vertical" or portrait:
+        return cover
+    return (
+        f"split[bg_in][fg_in];"
+        f"[bg_in]scale={w // 4}:{h // 4}:force_original_aspect_ratio=increase,crop={w // 4}:{h // 4},"
+        f"boxblur=10:2,scale={w}:{h},setsar=1[bg];"
+        f"[fg_in]scale={w}:-2,setsar=1[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
+    )
+
+
+def zoom_keys_filter(keys: list, rate: str, draft: bool) -> str:
+    """Punch-in zoom changes INSIDE one range — no cut, so the audio stays continuous.
+
+    keys: [{"at": 0.0, "zoom": 1.0}, {"at": 1.85, "zoom": 1.12, "anchor_y": 0.7}, ...]
+    `at` is seconds from the range start. Each key holds until the next one (hard
+    punch, the short-form convention). Optional "ramp": seconds to ease into the
+    new zoom instead of cutting (a slow push).
+    """
+    w, h = (720, 1280) if draft else (1080, 1920)
+    keys = sorted(keys, key=lambda k: float(k["at"]))
+
+    def piecewise(field: str, default: float) -> str:
+        expr = f"{float(keys[0].get(field, default)):.4f}"
+        prev = float(keys[0].get(field, default))
+        for k in keys[1:]:
+            at, val = float(k["at"]), float(k.get(field, default))
+            ramp = float(k.get("ramp", 0) or 0)
+            if ramp > 0 and field == "zoom":
+                # ease-out cubic from prev to val over `ramp` seconds
+                p = f"min(1,(it-{at:.4f})/{ramp:.4f})"
+                step = f"({prev:.4f}+({val:.4f}-{prev:.4f})*(1-pow(1-{p},3)))"
+            else:
+                step = f"{val:.4f}"
+            expr = f"if(gte(it,{at:.4f}),{step},{expr})"
+            prev = val
+        return expr
+
+    z = piecewise("zoom", 1.0)
+    a = piecewise("anchor_y", 0.5)
+    return (f"zoompan=z='{z}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)*({a})'"
+            f":d=1:s={w}x{h}:fps={rate},setsar=1")
+
+
 def extract_segment(
     source: Path,
     seg_start: float,
@@ -254,6 +328,11 @@ def extract_segment(
     preview: bool = False,
     draft: bool = False,
     rate: str | None = None,
+    output_format: str = "source",
+    zoom: float = 1.0,
+    anchor_y: float = 0.5,
+    audio_chain: str = "",
+    zoom_keys: list | None = None,
 ) -> None:
     """Extract a cut range as its own MP4 with grade + 30ms audio fades baked in.
 
@@ -268,15 +347,22 @@ def extract_segment(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     portrait = is_portrait_source(source)
-    if draft:
-        scale = "scale=-2:1280" if portrait else "scale=1280:-2"
-    else:
-        scale = "scale=-2:1920" if portrait else "scale=1920:-2"
+    scale = layout_filter(output_format, portrait, draft)
 
     vf_parts: list[str] = []
     if is_hdr_source(source):
         vf_parts.append(TONEMAP_CHAIN)
     vf_parts.append(scale)
+    if zoom and zoom > 1.0:
+        # Punch-in: enlarge, then crop back to the canvas. anchor_y < 0.5 keeps
+        # the top of the frame (faces sit high in a talking-head shot).
+        vf_parts.append(
+            f"scale=iw*{zoom:.4f}:ih*{zoom:.4f},"
+            f"crop=iw/{zoom:.4f}:ih/{zoom:.4f}:(iw-ow)/2:(ih-oh)*{anchor_y:.3f},"
+            f"scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
+        )
+    if zoom_keys:
+        vf_parts.append(zoom_keys_filter(zoom_keys, rate or "24", draft))
     if grade_filter:
         vf_parts.append(grade_filter)
     vf = ",".join(vf_parts)
@@ -284,6 +370,9 @@ def extract_segment(
     # 30ms audio fades at both edges (Rule 3) — prevent pops
     fade_out_start = max(0.0, duration - 0.03)
     af = f"afade=t=in:st=0:d=0.03,afade=t=out:st={fade_out_start:.3f}:d=0.03"
+    if audio_chain:
+        # Dialogue clean-up (EDL "audio_chain") runs before the edge fades.
+        af = f"{audio_chain},{af}"
 
     if draft:
         preset, crf = "ultrafast", "28"
@@ -320,6 +409,7 @@ def extract_all_segments(
     preview: bool,
     draft: bool = False,
     fps: str | None = None,
+    output_format: str = "source",
 ) -> list[Path]:
     """Extract every EDL range into edit_dir/clips_graded/seg_NN.mp4.
     Returns the ordered list of segment paths.
@@ -373,7 +463,12 @@ def extract_all_segments(
         print(f"  [{i:02d}] {src_name}  {start:7.2f}-{end:7.2f}  ({duration:5.2f}s)  {note}")
         if is_auto:
             print(f"        grade: {seg_filter or '(none)'}")
-        extract_segment(src_path, start, duration, seg_filter, out_path, preview=preview, draft=draft, rate=out_rate)
+        # Optional per-range punch-in: {"zoom": 1.15, "zoom_anchor_y": 0.35}
+        extract_segment(src_path, start, duration, seg_filter, out_path, preview=preview, draft=draft,
+                        rate=out_rate, output_format=output_format,
+                        zoom=float(r.get("zoom", 1.0)), anchor_y=float(r.get("zoom_anchor_y", 0.5)),
+                        audio_chain="" if r.get("raw_audio") else edl.get("audio_chain", ""),
+                        zoom_keys=r.get("zooms"))
         seg_paths.append(out_path)
 
     return seg_paths
@@ -386,7 +481,11 @@ def concat_segments(segment_paths: list[Path], out_path: Path, edit_dir: Path) -
     """Lossless concat via the concat demuxer. No re-encode."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     concat_list = edit_dir / "_concat.txt"
-    concat_list.write_text("".join(f"file '{p.resolve()}'\n" for p in segment_paths))
+    # Forward slashes + UTF-8: ffmpeg reads the list as UTF-8, and Windows
+    # backslashes / cp1252 accents ("Vídeos") would make it miss the files.
+    concat_list.write_text(
+        "".join(f"file '{p.resolve().as_posix()}'\n" for p in segment_paths), encoding="utf-8"
+    )
 
     cmd = [
         "ffmpeg", "-y",
@@ -490,7 +589,7 @@ def build_master_srt(edl: dict, edit_dir: Path, out_path: Path) -> None:
             seg_offset += seg_duration
             continue
 
-        transcript = json.loads(tr_path.read_text())
+        transcript = json.loads(tr_path.read_text(encoding="utf-8"))
         words_in_seg = _words_in_range(transcript, seg_start, seg_end)
 
         for chunk in chunk_words(words_in_seg):
@@ -517,7 +616,7 @@ def build_master_srt(edl: dict, edit_dir: Path, out_path: Path) -> None:
         lines.append(f"{_srt_timestamp(a)} --> {_srt_timestamp(b)}")
         lines.append(t)
         lines.append("")
-    out_path.write_text("\n".join(lines))
+    out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"master SRT → {out_path.name} ({len(entries)} cues)")
 
 
@@ -674,7 +773,8 @@ def build_final_composite(
 
     # Subtitles LAST — Rule 1
     if has_subs:
-        subs_abs = str(subtitles_path.resolve()).replace(":", r"\:").replace("'", r"\'")
+        # as_posix: backslashes are escape characters inside a filtergraph.
+        subs_abs = subtitles_path.resolve().as_posix().replace(":", r"\:").replace("'", r"\'")
         filter_parts.append(
             f"{current}subtitles='{subs_abs}':force_style='{SUB_FORCE_STYLE}'[outv]"
         )
@@ -703,6 +803,42 @@ def build_final_composite(
     ]
     print(f"compositing → {out_path.name}")
     print(f"  overlays: {len(overlays)}, subtitles: {'yes' if has_subs else 'no'}")
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+
+# -------- Sound effects -------------------------------------------------------
+
+
+def mix_sfx(in_path: Path, sfx: list[dict], out_path: Path, edit_dir: Path) -> None:
+    """Mix one-shot SFX into the composite's audio. Video is stream-copied.
+
+    Each entry: {"file": "sfx/pop.wav", "at": 1.23, "gain_db": -12}
+    `at` is the output time where the FILE starts — align its hit yourself
+    (helpers/sfx.py prints each effect's hit offset). amix normalize=0 so the
+    dialogue is not attenuated by the number of inputs.
+    """
+    inputs: list[str] = ["-i", str(in_path)]
+    parts: list[str] = []
+    labels: list[str] = ["[0:a]"]
+    for i, s in enumerate(sfx, start=1):
+        inputs += ["-i", str(resolve_path(s["file"], edit_dir))]
+        delay_ms = max(0, round(float(s["at"]) * 1000))
+        gain = float(s.get("gain_db", -12.0))
+        parts.append(
+            f"[{i}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"volume={gain}dB,adelay={delay_ms}|{delay_ms}[s{i}]"
+        )
+        labels.append(f"[s{i}]")
+    parts.append(f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0[aout]")
+    cmd = [
+        "ffmpeg", "-y", *inputs,
+        "-filter_complex", ";".join(parts),
+        "-map", "0:v", "-map", "[aout]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-movflags", "+faststart",
+        str(out_path),
+    ]
+    print(f"sfx → {len(sfx)} effect(s) mixed")
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
@@ -746,19 +882,31 @@ def main() -> None:
              "(falls back to 24 if it can't be probed). Pass e.g. --fps 30 or "
              "--fps 30000/1001 to force.",
     )
+    ap.add_argument(
+        "--format",
+        choices=OUTPUT_FORMATS,
+        default=None,
+        help="Output canvas. source (default) keeps the source orientation; vertical = "
+             "1080x1920 for Reels/TikTok/Shorts (center crop); vertical-blur = 1080x1920 "
+             "with the full frame over a blurred fill. Overrides the EDL's \"format\".",
+    )
     args = ap.parse_args()
 
     edl_path = args.edl.resolve()
     if not edl_path.exists():
         sys.exit(f"edl not found: {edl_path}")
 
-    edl = json.loads(edl_path.read_text())
+    edl = json.loads(edl_path.read_text(encoding="utf-8"))
+    output_format = args.format or edl.get("format") or "source"
+    if output_format not in OUTPUT_FORMATS:
+        sys.exit(f"unknown format {output_format!r}; use one of {', '.join(OUTPUT_FORMATS)}")
     edit_dir = edl_path.parent
     out_path = args.output.resolve()
 
     # 1. Extract per-segment (auto-grade per range if EDL grade is "auto")
     segment_paths = extract_all_segments(
-        edl, edit_dir, preview=args.preview, draft=args.draft, fps=args.fps
+        edl, edit_dir, preview=args.preview, draft=args.draft, fps=args.fps,
+        output_format=output_format,
     )
 
     # 2. Concat → base
@@ -782,7 +930,21 @@ def main() -> None:
 
     # 4. Composite (overlays + subtitles LAST) → intermediate (pre-loudnorm) path
     overlays = edl.get("overlays") or []
-    if args.no_loudnorm:
+    sfx = edl.get("sfx") or []
+    if sfx:
+        # SFX are mixed into the composite, so loudnorm masters dialogue + SFX together.
+        tmp_nosfx = out_path.with_suffix(".nosfx.mp4")
+        build_final_composite(base_path, overlays, subs_path, tmp_nosfx, edit_dir)
+        tmp_composite = out_path.with_suffix(".prenorm.mp4")
+        mix_sfx(tmp_nosfx, sfx, tmp_composite, edit_dir)
+        tmp_nosfx.unlink(missing_ok=True)
+        if args.no_loudnorm:
+            tmp_composite.replace(out_path)
+        else:
+            print("loudness normalization → social-ready (-14 LUFS / -1 dBTP / LRA 11)")
+            apply_loudnorm_two_pass(tmp_composite, out_path, preview=args.draft)
+            tmp_composite.unlink(missing_ok=True)
+    elif args.no_loudnorm:
         # Composite directly to final output
         build_final_composite(base_path, overlays, subs_path, out_path, edit_dir)
     else:

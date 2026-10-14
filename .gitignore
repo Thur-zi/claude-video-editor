@@ -58,3 +58,8 @@ master.srt
 takes_packed.md
 edl.json
 project.md
+
+# Template render frames
+*_frames/
+ov_frames/
+ec_frames/

@@ -1,9 +1,47 @@
 ---
-name: video-use
+name: claude-video-editor
 description: Edit any video by conversation. Transcribe, cut, color grade, generate overlay animations, burn subtitles — for talking heads, montages, tutorials, travel, interviews. No presets, no menus. Ask questions, confirm the plan, execute, iterate, persist. Production-correctness rules are hard; everything else is artistic freedom.
 ---
 
 # Video Use
+
+## Setup of this fork (local transcription, Windows-friendly) — read first
+
+These override anything below that conflicts with them. `<repo>` = the directory containing this SKILL.md.
+
+- **Python:** use the repo's virtualenv with absolute helper paths, e.g.
+  `<repo>/.venv/Scripts/python.exe <repo>/helpers/transcribe_batch.py . --language pt` (Windows) or
+  `<repo>/.venv/bin/python …` (macOS/Linux). On Windows prefix Bash commands with `PYTHONIOENCODING=utf-8`.
+- **Transcription is local by default** (faster-whisper; `.env` → `VIDEO_USE_ASR=local`, model `small`). No API key
+  needed. Pass `--language pt` (or the user's language). If `ELEVENLABS_API_KEY` is set and `VIDEO_USE_ASR=scribe`,
+  ElevenLabs Scribe is used instead. Local Whisper keeps most fillers ("éé", "hum", repeats) but not all — check
+  ambiguous pauses with `timeline_view.py`. No audio events / diarization: every word is `S0`.
+  Harder audio: `VIDEO_USE_WHISPER_MODEL=medium` (2–3× slower; delete the cached transcript first).
+- **Weak machines:** animation sub-agents may *author* in parallel but **render one at a time**. Prefer PIL/ffmpeg
+  overlays. `render.py --draft` while iterating, `--preview` for self-eval, final render only on approval.
+- **Default delivery is Reels/TikTok/Shorts:** `"format": "vertical"` in the EDL (1080×1920 centre crop — right for
+  a talking head) or `"vertical-blur"` (whole landscape frame over a blurred fill). Quick captions:
+  `--build-subtitles`. Polished captions: `templates/captions_overlay.py` (below).
+- **Read `references/short-form-playbook.md` before planning any social edit** — researched defaults: hook in
+  frame 1, restraint, face-safe placement, caption specs, safe zones, motion timings, SFX levels, dialogue chain,
+  picture finishing, end cards.
+- **Production toolkit** (all in this repo):
+  - `render.py` EDL extras: `"zooms": [{"at", "zoom", "anchor_y"}]` per range (punch-ins inside one range — no
+    audio seam), `"audio_chain"` (dialogue clean-up; `"raw_audio": true` skips a range), `"sfx": [{"file", "at",
+    "gain_db"}]` (mixed before loudnorm), `"format"`; env `VIDEO_USE_SUB_FONT` / `VIDEO_USE_SUB_MARGINV`.
+  - `helpers/face_track.py <video> -o <edit>/face.json` — CPU face track (OpenCV Haar) + `to_canvas()` to map the
+    face keep-out onto the canvas. **Graphics must never touch the face.**
+  - `templates/captions_overlay.py` — word-by-word captions (Inter Display, two sizes, 2-line centred blocks,
+    fade+blur-in), face/avoid-box collision check, writes an RGBA overlay to put in the EDL `overlays`
+    (then render with `--no-subtitles`).
+  - `templates/end_card.py` — clean animated end card (big outline→fill headline, staggered lines) → a source clip
+    to append as the last EDL range.
+  - `helpers/sfx.py <edit>/sfx` — synthesized whoosh / pop / click / impact / riser (+ hit offsets).
+  - `helpers/extract_logo.py` — lift a flat-colour logo off a solid background in a reference video (clean,
+    re-vectorised RGBA) when the user wants to match a reference's branding (only with their own assets).
+  - Fonts offline in `fonts/` (Inter, Montserrat — SIL OFL).
+- **Ask the user's language and answer in it** (the original users are Brazilian: default to pt-BR).
+- Paths with accents/spaces are handled by the helpers; in hand-written ffmpeg commands use forward slashes and quote.
 
 ## Principle
 

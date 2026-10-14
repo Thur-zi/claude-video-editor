@@ -20,7 +20,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from transcribe import load_api_key, transcribe_one, transcript_path
+from transcribe import load_api_key, resolve_engine, transcribe_one, transcript_path
 
 
 VIDEO_EXTS = {".mp4", ".MP4", ".mov", ".MOV", ".mkv", ".MKV", ".avi", ".AVI", ".m4v"}
@@ -62,6 +62,13 @@ def main() -> None:
         default=0,
         help="Zero-based audio track to transcribe (OBS: 0 = game, 1 = mic).",
     )
+    ap.add_argument(
+        "--engine",
+        choices=["local", "scribe"],
+        default=None,
+        help="local = faster-whisper (free, CPU, one file at a time); scribe = ElevenLabs. "
+             "Default: VIDEO_USE_ASR from env/.env, else scribe when a key exists, else local.",
+    )
     args = ap.parse_args()
 
     videos_dir = args.videos_dir.resolve()
@@ -84,19 +91,23 @@ def main() -> None:
         print("nothing to do")
         return
 
-    api_key = load_api_key()
+    engine = resolve_engine(args.engine)
+    api_key = load_api_key() if engine == "scribe" else ""
+    # Local Whisper already uses every CPU core; parallel files would only thrash RAM.
+    workers = 1 if engine == "local" else args.workers
 
-    print(f"transcribing {len(pending)} files with {args.workers} parallel workers")
+    print(f"transcribing {len(pending)} files with {workers} worker(s) [engine: {engine}]")
     t0 = time.time()
 
     errors: list[tuple[Path, str]] = []
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(
                 transcribe_one,
                 video=v,
                 edit_dir=edit_dir,
                 api_key=api_key,
+                engine=engine,
                 language=args.language,
                 num_speakers=args.num_speakers,
                 verbose=False,

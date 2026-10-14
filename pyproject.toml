@@ -1,7 +1,7 @@
 [project]
-name = "video-use"
+name = "claude-video-editor"
 version = "0.1.0"
-description = "Conversation-driven video editor skill for Claude Code"
+description = "Conversation-driven video editor skill for Claude Code (fork of browser-use/video-use with local transcription)"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
@@ -10,6 +10,9 @@ dependencies = [
     "matplotlib",
     "pillow",
     "numpy",
+    "scipy",
+    "faster-whisper",                  # local transcription (default engine)
+    "opencv-python-headless<5",        # face keep-out (4.x ships the Haar cascade)
 ]
 
 [project.optional-dependencies]

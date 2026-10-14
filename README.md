@@ -1,112 +1,144 @@
+# claude-video-editor
+
+**Edite vídeos conversando com o Claude.** Você coloca o vídeo bruto numa pasta, abre o Claude Code ali e
+pede, em português normal: *"edita esse vídeo para Reels de até 1 minuto, tira as hesitações e coloca
+legenda"*. O Claude transcreve, propõe um plano, espera o seu OK, corta, legenda, anima, confere o próprio
+resultado e te entrega um `final.mp4` pronto para Reels, TikTok e Shorts.
+
+Este projeto é um *fork* do [browser-use/video-use](https://github.com/browser-use/video-use) (licença MIT),
+adaptado para rodar **de graça e localmente**, inclusive em **PCs Windows simples**, sem nenhuma API paga.
+
+> Status: experimental — feito para testes entre amigos. Feedback é muito bem-vindo (abra uma *issue*).
+
 <p align="center">
-  <img src="static/video-use-banner.png" alt="video-use" width="100%">
+  <img src="static/timeline-view.svg" alt="Como o Claude 'lê' o vídeo: miniaturas, forma de onda e palavras com tempo" width="100%">
 </p>
 
-# video-use
+## Como funciona
 
-Introducing **video-use** — edit videos with Claude Code. 100% open source.
+O Claude não "assiste" o vídeo. Ele **lê**:
 
-Drop raw footage in a folder, chat with Claude Code, get `final.mp4` back. Works for any content — talking heads, montages, tutorials, travel, interviews — without presets or menus.
+1. **Transcrição palavra por palavra** (Whisper rodando no seu computador), com o tempo exato de cada
+   palavra e das pausas. É assim que ele sabe onde cortar sem picotar palavras.
+2. **Imagens sob demanda**: quando precisa decidir algo visual, gera um quadro com miniaturas + forma de
+   onda daquele trecho.
+3. Ele escreve uma **lista de cortes** (`edl.json`) e o `render.py` monta tudo com ffmpeg.
+4. Antes de te mostrar, ele **confere o próprio vídeo** (cortes, estalos de áudio, legenda tampando algo,
+   volume) e corrige o que achar.
 
-Cloud-hosted video-use is coming. [Join the waitlist at video-use.com](https://video-use.com?utm_source=github).
+Você participa o tempo todo: ele propõe a estratégia, você aprova ou muda; depois de cada prévia você
+pede ajustes em linguagem natural ("legenda maior", "corta essa frase", "tira o zoom").
 
-## What it does
+## O que ele faz
 
-- **Cuts out filler words** (`umm`, `uh`, false starts) and dead space between takes
-- **Auto color grades** every segment (warm cinematic, neutral punch, or any custom ffmpeg chain)
-- **30ms audio fades** at every cut so you never hear a pop
-- **Burns subtitles** in your style — 2-word UPPERCASE chunks by default, fully customizable
-- **Generates animation overlays** via [HyperFrames](https://github.com/heygen-com/hyperframes), [Remotion](https://www.remotion.dev/), [Manim](https://www.manim.community/), or PIL — spawned in parallel sub-agents, one per animation
-- **Self-evaluates the rendered output** at every cut boundary before showing you anything
-- **Persists session memory** in `project.md` so next week's session picks up where you left off
+- ✂️ **Corta hesitações, pausas e repetições** ("éé", "hum", falsas largadas) e escolhe o melhor take.
+- 📱 **Formato vertical 9:16** (1080×1920) — recorte central ou vídeo inteiro sobre fundo desfocado.
+- 💬 **Legendas animadas palavra por palavra** no estilo "premium" das redes: duas espessuras (palavras-chave
+  grandes), fonte Inter Display, blocos centralizados, entrada com fade + desfoque.
+- 🙂 **Nunca tampa o rosto**: detecta o rosto automaticamente e a montagem *falha* se algum texto encostar
+  nele (ou em áreas que você marcar, como um logo na camiseta).
+- 🔎 **Zoom de impacto** por frase, sem cortar o áudio.
+- 🎬 **Cartão final animado** (número/data grande que se desenha e preenche, textos em sequência).
+- 🔊 **Áudio pronto para redes**: tratamento de voz de celular (graves, ruído, presença, compressão) e volume
+  em −14 LUFS. Efeitos sonoros (whoosh, pop, impacto) **gerados por código**, sem baixar nada.
+- 🎨 **Acabamento de imagem**: ampliação de qualidade para vídeos de baixa resolução, correção leve de cor.
+- 🧠 **Manual de edição embutido** (`references/short-form-playbook.md`): pesquisa sobre gancho, ritmo,
+  legenda, áreas seguras das plataformas, tempos de animação, som e o que deixa vídeo "com cara de amador".
+- 🧩 **Copia o estilo de um vídeo de referência**: mede posição/tamanho da legenda, tempos de animação e
+  identifica a fonte (`helpers/extract_logo.py` recorta um logo seu de um vídeo de referência).
 
-## Setup prompt
+## Requisitos
 
-Paste into Claude Code, Codex, Hermes, Openclaw, or any agent with shell access:
+- [Claude Code](https://claude.com/claude-code) (app desktop ou terminal) com uma conta Claude.
+- Python 3.10+ e ffmpeg.
+- ~2 GB livres (dependências + modelo do Whisper). Roda em CPU; não precisa de placa de vídeo.
+- Testado em Windows 11 (i5 de 2 núcleos, 8 GB de RAM). Deve funcionar em macOS/Linux.
+
+## Instalação (o jeito fácil)
+
+Abra o Claude Code e cole:
 
 ```text
-Set up https://github.com/browser-use/video-use for me.
-
-Read install.md first to install this repo, wire up ffmpeg, register the skill with whichever agent you're running under, and set up the ElevenLabs API key — ask me to paste it when you need it. Then read SKILL.md for daily usage, and always read helpers/ because that's where the editing scripts live. After install, don't transcribe anything on your own — just tell me it's ready and wait for me to drop footage into a folder.
+Instale o https://github.com/Thur-zi/claude-video-editor para mim. Leia o install.md e siga os passos:
+clonar, criar o ambiente Python, instalar o ffmpeg, registrar a skill e configurar o .env.
+Depois me avise que está pronto — não transcreva nada sozinho.
 ```
 
-The agent handles the clone, dependencies, skill registration, and prompts you once for your ElevenLabs API key (grab one at [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys)).
+O Claude faz tudo e só te pergunta antes de instalar programas no sistema.
 
-Then point your agent at a folder of raw takes:
-
-```bash
-cd /path/to/your/videos
-claude    # or codex, hermes, etc.
-```
-
-For always-on editing from your own VPS or Telegram, run the agent through [Browser Use Box](https://browser-use.com/bux). [Watch the 15-second demo](https://www.tiktok.com/@browser_use/video/7639824093721758989).
-
-And in the session:
-
-> edit these into a launch video
-
-It inventories the sources, proposes a strategy, waits for your OK, then produces `edit/final.mp4` next to your sources. All outputs live in `<videos_dir>/edit/` — the skill directory stays clean.
-
-## Manual install
-
-If you'd rather do it by hand:
+### Instalação manual
 
 ```bash
-# 1. Clone and symlink into your agent's skills directory
-git clone https://github.com/browser-use/video-use ~/Developer/video-use
-ln -sfn ~/Developer/video-use ~/.claude/skills/video-use        # Claude Code
-# ln -sfn ~/Developer/video-use ~/.codex/skills/video-use       # Codex
-
-# 2. Install deps
-cd ~/Developer/video-use
-uv sync                         # or: pip install -e .
-brew install ffmpeg             # required
-brew install yt-dlp             # optional, for downloading online sources
-
-# 3. Add your ElevenLabs API key
+git clone https://github.com/Thur-zi/claude-video-editor
+cd claude-video-editor
+python -m venv .venv
+.venv/Scripts/python -m pip install -e .      # Windows  (macOS/Linux: .venv/bin/python)
 cp .env.example .env
-$EDITOR .env                    # ELEVENLABS_API_KEY=...
 ```
 
-## How it works
+Instale o ffmpeg (`winget install Gyan.FFmpeg` no Windows, `brew install ffmpeg` no Mac) e registre a skill:
 
-The LLM never watches the video. It **reads** it — through two layers that together give it everything it needs to cut with word-boundary precision.
-
-<p align="center">
-  <img src="static/timeline-view.svg" alt="timeline_view composite — filmstrip + speaker track + waveform + word labels + silence-gap cut candidates" width="100%">
-</p>
-
-**Layer 1 — Audio transcript (always loaded).** One ElevenLabs Scribe call per source gives word-level timestamps, speaker diarization, and audio events (`(laughter)`, `(applause)`, `(sigh)`). All takes pack into a single ~12KB `takes_packed.md` — the LLM's primary reading view.
-
-```
-## C0103  (duration: 43.0s, 8 phrases)
-  [002.52-005.36] S0 Ninety percent of what a web agent does is completely wasted.
-  [006.08-006.74] S0 We fixed this.
+```bash
+# Windows (Prompt de Comando)
+mklink /J "%USERPROFILE%\.claude\skills\claude-video-editor" "C:\caminho\para\claude-video-editor"
+# macOS / Linux
+ln -sfn "$(pwd)" ~/.claude/skills/claude-video-editor
 ```
 
-**Layer 2 — Visual composite (on demand).** `timeline_view` produces a filmstrip + waveform + word labels PNG for any time range. Called only at decision points — ambiguous pauses, retake comparisons, cut-point sanity checks.
+**Windows:** se aparecer erro de DLL ao transcrever, instale o *Microsoft Visual C++ Redistributable*
+(`winget install Microsoft.VCRedist.2015+.x64`). Veja o `install.md` para outros detalhes.
 
-> Naive approach: 30,000 frames × 1,500 tokens = **45M tokens of noise**.
-> Video Use: **12KB text + a handful of PNGs**.
+## Como usar
 
-Same idea as browser-use giving an LLM a structured DOM instead of a screenshot — but for video.
+1. Coloque o(s) vídeo(s) numa pasta.
+2. Abra o Claude Code **nessa pasta**.
+3. Peça o que quer, por exemplo:
+   - *"edita esse vídeo para Reels de até 1 minuto, tira as hesitações e coloca legenda"*
+   - *"faz um corte de 30 segundos com a parte mais forte, legenda palavra por palavra"*
+   - *"quero no mesmo estilo deste vídeo de referência: C:\...\referencia.mp4"*
+4. Ele propõe um plano → você aprova → ele te mostra a prévia → você pede ajustes → `final.mp4`.
 
-## Pipeline
+Tudo o que ele gera fica em `<sua pasta>/edit/` (transcrições, cortes, prévias, final). O vídeo original
+nunca é alterado.
 
+**Tempo (PC simples):** transcrição ≈ 1× a duração do vídeo; cada prévia de 1 min ≈ 2–4 min de render.
+
+## Ferramentas incluídas
+
+| Arquivo | O que faz |
+|---|---|
+| `helpers/transcribe.py`, `transcribe_batch.py` | Transcrição palavra por palavra (Whisper local; ElevenLabs opcional) |
+| `helpers/pack_transcripts.py` | Junta as transcrições num texto compacto que o Claude lê |
+| `helpers/timeline_view.py` | Miniaturas + forma de onda de um trecho |
+| `helpers/render.py` | Corta, ajusta formato/zoom, trata o áudio, aplica sobreposições e legendas, normaliza volume |
+| `helpers/face_track.py` | Detecta o rosto para nenhum texto tampá-lo |
+| `helpers/sfx.py` | Gera efeitos sonoros (whoosh, pop, click, impacto, riser) |
+| `helpers/grade.py` | Correção de cor |
+| `helpers/extract_logo.py` | Recorta um logo de cor chapada de um vídeo de referência |
+| `templates/captions_overlay.py` | Legenda palavra por palavra (estilo premium), com checagem de rosto |
+| `templates/end_card.py` | Cartão final animado configurável |
+| `references/short-form-playbook.md` | Manual de edição para vídeos curtos |
+
+Exemplo direto (sem o Claude), gerando um cartão final:
+
+```bash
+.venv/Scripts/python templates/end_card.py -o endcard.mp4 --eyebrow "WORKSHOP DE EDIÇÃO" \
+  --title "com Claude" --hero "22/10" --line "19H  •  AUDITÓRIO CENTRAL" --footer "inscrições no link da bio"
 ```
-Transcribe ──> Pack ──> LLM Reasons ──> EDL ──> Render ──> Self-Eval
-                                                              │
-                                                              └─ issue? fix + re-render (max 3)
-```
 
-The self-eval loop runs `timeline_view` on the _rendered output_ at every cut boundary — catches visual jumps, audio pops, hidden subtitles. You see the preview only after it passes.
+## Diferenças em relação ao video-use original
 
-## Design principles
+- Transcrição **local e gratuita** (faster-whisper) como padrão; ElevenLabs continua opcional.
+- Correções para **Windows** (acentos/UTF-8, caminhos com `\` e acentos, fontes, Smart App Control).
+- Formatos verticais, zoom por instante (sem corte de áudio), cadeia de tratamento de voz, efeitos sonoros
+  sintetizados, detecção de rosto, modelos de legenda e cartão final, manual de edição pesquisado.
 
-1. **Text + on-demand visuals.** No frame-dumping. The transcript is the surface.
-2. **Audio is primary, visuals follow.** Cuts come from speech boundaries and silence gaps.
-3. **Ask → confirm → execute → self-eval → persist.** Never touch the cut without strategy approval.
-4. **Zero assumptions about content type.** Look, ask, then edit.
-5. **12 hard rules, artistic freedom elsewhere.** Production-correctness is non-negotiable. Taste isn't.
+## Créditos e licenças
 
-See [`SKILL.md`](./SKILL.md) for the full production rules and editing craft.
+- Base: [browser-use/video-use](https://github.com/browser-use/video-use) — MIT (veja `LICENSE`).
+- Fontes em `fonts/`: [Inter](https://github.com/rsms/inter) e [Montserrat](https://github.com/JulietaUla/Montserrat) —
+  SIL Open Font License (`fonts/OFL-*.txt`).
+- Transcrição: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT).
+
+Use com responsabilidade: edite apenas vídeos que você tem direito de usar, e não use logos/marcas de terceiros
+sem autorização.

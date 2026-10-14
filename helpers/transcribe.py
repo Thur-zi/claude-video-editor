@@ -36,7 +36,7 @@ SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 def load_api_key() -> str:
     for candidate in [Path(__file__).resolve().parent.parent / ".env", Path(".env")]:
         if candidate.exists():
-            for line in candidate.read_text().splitlines():
+            for line in candidate.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
@@ -47,6 +47,25 @@ def load_api_key() -> str:
     if not v:
         sys.exit("ELEVENLABS_API_KEY not found in .env or environment")
     return v
+
+
+def find_api_key() -> str:
+    """Like load_api_key, but returns "" instead of exiting."""
+    try:
+        return load_api_key()
+    except SystemExit:
+        return ""
+
+
+def resolve_engine(engine: str | None) -> str:
+    """CLI --engine > VIDEO_USE_ASR (env or .env) > scribe if a key exists, else local."""
+    if engine:
+        return engine
+    from local_asr import _setting
+    configured = _setting("VIDEO_USE_ASR", "")
+    if configured in ("local", "scribe"):
+        return configured
+    return "scribe" if find_api_key() else "local"
 
 
 def count_audio_tracks(video_path: Path) -> int:
@@ -128,11 +147,12 @@ def transcript_path(edit_dir: Path, video: Path, audio_track: int = 0) -> Path:
 def transcribe_one(
     video: Path,
     edit_dir: Path,
-    api_key: str,
+    api_key: str = "",
     language: str | None = None,
     num_speakers: int | None = None,
     verbose: bool = True,
     audio_track: int = 0,
+    engine: str = "scribe",
 ) -> Path:
     """Transcribe a single video. Returns path to transcript JSON.
 
@@ -172,12 +192,18 @@ def transcribe_one(
                    if n_tracks > 1 else "Check the source audio.")
             )
 
-        size_mb = audio.stat().st_size / (1024 * 1024)
-        if verbose:
-            print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
-        payload = call_scribe(audio, api_key, language, num_speakers)
+        if engine == "local":
+            from local_asr import transcribe_local
+            if verbose:
+                print(f"  transcribing {video.stem} locally (faster-whisper, CPU)", flush=True)
+            payload = transcribe_local(audio, language, verbose=verbose)
+        else:
+            size_mb = audio.stat().st_size / (1024 * 1024)
+            if verbose:
+                print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
+            payload = call_scribe(audio, api_key, language, num_speakers)
 
-    out_path.write_text(json.dumps(payload, indent=2))
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     dt = time.time() - t0
 
     if verbose:
@@ -218,6 +244,13 @@ def main() -> None:
              "and the mic on track 1; without this ffmpeg applies its default audio "
              "stream selection, which picks the track with the most channels.",
     )
+    ap.add_argument(
+        "--engine",
+        choices=["local", "scribe"],
+        default=None,
+        help="local = faster-whisper on this machine (free, slower); scribe = ElevenLabs. "
+             "Default: VIDEO_USE_ASR from env/.env, else scribe when a key exists, else local.",
+    )
     args = ap.parse_args()
 
     video = args.video.resolve()
@@ -225,12 +258,14 @@ def main() -> None:
         sys.exit(f"video not found: {video}")
 
     edit_dir = (args.edit_dir or (video.parent / "edit")).resolve()
-    api_key = load_api_key()
+    engine = resolve_engine(args.engine)
+    api_key = load_api_key() if engine == "scribe" else ""
 
     transcribe_one(
         video=video,
         edit_dir=edit_dir,
         api_key=api_key,
+        engine=engine,
         language=args.language,
         num_speakers=args.num_speakers,
         audio_track=args.audio_track,
